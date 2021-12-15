@@ -26,7 +26,7 @@
 import hubitat.zigbee.clusters.iaszone.ZoneStatus
  
 metadata {
-	definition (name: "Heiman Zigbee Smoke Detector", namespace: "scruffy-sjb", author: "scruffy-sjb and cuboy29") {
+	definition (name: "Heiman Zigbee Smoke Detector", namespace: "scruffy-sjb", author: "scruffy-sjb and cuboy29", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/Heiman%20Zigbee%20Smoke%20Detector.groovy?token=AU7T2OC4L7HCBAMMO4YWO4TBXIEZY") {
 		
         capability "Configuration"
         capability "Smoke Detector"
