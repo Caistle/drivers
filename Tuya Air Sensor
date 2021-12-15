@@ -1,0 +1,1099 @@
+/*
+* Tuya Air Sensor
+*
+* Description:
+* This Hubitat driver is designed for use with the Tuya Air Sensor ZN294151
+*
+* NOTE: If you update the driver using the import or other method, you should save your Preferences again.
+*
+* Features List:
+* Ability to check temperature 0-60 (â„ƒ)
+* Ability to check humidity 0-95 (%)
+* Ability to check CO2 0-1000 (ppm)
+* Ability to check a website (mine) if there is a newer version of the driver available
+* Ability to check formaldehyde 0-10.0 (mg/m3)
+* Ability to check VOC gas 0-99.9 (ppm)
+* 
+* Incomplete Features:
+* Not yet able to set regular reporting interval
+*
+* Licensing:
+* Copyright 2021 David Snell
+* Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+* in compliance with the License. You may obtain a copy of the License at: http://www.apache.org/licenses/LICENSE-2.0
+* Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+* on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+* for the specific language governing permissions and limitations under the License.
+*
+* Version Control:
+* 0.1.2 - Added preferences to offset reported values and changed all values to float with 0.1 rounding
+* 0.1.1 - Update to correct which is which between Formaldehyde and VOC values (they were reversed)
+* 0.1.0 - Initial start of driver
+* 
+* Thank you(s):
+* I would like to thank @Cobra his contributions to the community. Parts based on Cobra's driver update code
+* have been included at the bottom of the driver and are noted as such.
+*/
+
+import hubitat.zigbee.zcl.DataType
+
+metadata{
+	definition( name: "Tuya Air Sensor", namespace: "Snell", author: "David Snell", importUrl: "https://www.drdsnell.com/projects/hubitat/drivers/Tuya Air Sensor.groovy" ){
+		//capability "Configuration"
+		//capability "Refresh"
+		capability "Sensor"
+		capability "TemperatureMeasurement"
+        capability "CarbonDioxideMeasurement"
+        capability "RelativeHumidityMeasurement"
+        
+		// Commands that have been implemented
+        //command "ReadDevice" // Returns a few basic attributes to trace logging if enabled
+        
+        // Attributes being built into the device
+		attribute "Driver Name", "string" // Driver identifies the driver being used for update purposes
+		attribute "Driver Version", "string" // Version number of the driver
+        attribute "Driver Version Status", "string" // Status of the driver version compared to what is currently published
+        attribute "Status", "string" // Used to provide general status of the device
+        attribute "VOC", "number" // Volatile Organic Compounds (VOC) value detected
+        attribute "formaldehyde", "number" // Formaldehyde (HCHO) value detected
+        
+        fingerprint profileId: "0104", inClusters: "0000, 0004, 0005, EF00", outClusters: "0019, 000A", manufacturer: "_TZE200_8ygsuhe1", model: "TS0601", deviceJoinName: "Tuya ZigBee Air Sensor"
+	}
+	preferences{
+		section{
+            if( ShowAllPreferences || ShowAllPreferences == null ){
+                input( type: "decimal", name: "TemperatureOffset", title: "<b>Temperature Offset</b>", required: false, multiple: false, defaultValue: 0 )
+                input( type: "decimal", name: "HumidityOffset", title: "<b>Humidity Offset</b>", required: false, multiple: false, defaultValue: 0 )
+                input( type: "decimal", name: "CO2Offset", title: "<b>CO2 Offset</b>", required: false, multiple: false, defaultValue: 0 )
+                input( type: "decimal", name: "FormaldehydeOffset", title: "<b>Formaldehyde Offset</b>", required: false, multiple: false, defaultValue: 0 )
+                input( type: "decimal", name: "VOCOffset", title: "<b>VOC Offset</b>", required: false, multiple: false, defaultValue: 0 )
+			    //input( type: "enum", name: "ReportInterval", title: "<b>Reporting interval?</b>", description: "", required: false, multiple: false, options: [ "1 minute" ,"5 minutes", "10 minutes", "1 hour", "1 day" ], defaultValue: "5 minutes" )
+                input( type: "enum", name: "LogType", title: "<b>Enable Logging?</b>", required: true, multiple: false, options: [ "None", "Info", "Debug", "Trace" ], defaultValue: "Info" )
+		        input( type: "bool", name: "ShowAllPreferences", title: "<b>Show All Preferences?</b>", required: false, defaultValue: true )
+            } else {
+                input( type: "bool", name: "ShowAllPreferences", title: "<b>Show All Preferences?</b>", required: false, defaultValue: true )
+            }
+        }
+	}
+}
+
+// Called when preferences are saved
+// This clears state variables then sets some basic information as well as does a reconfig of the device
+def updated(){
+    Logging( "Saved preferences", 2 )
+    //state.clear()
+    state.'Driver Version' = "0.1.2"
+    state.'Driver Name' = "Tuya Air Sensor"
+    
+    // Set up the regular checks for driver version
+	schedule( new Date(), CheckForUpdate )
+    
+    // Configure the regular ZigBee reporting
+    //configure()
+}
+
+// Parse incoming device messages to generate events
+def parse( String description ){
+    parseReport( description )   
+}
+
+/*
+* This parses ZigBee reports. I am including as many clusters as possible in here, even ones this
+* driver will never handle, so that it can be a useful reference for future work or others.
+*/
+private parseReport( String description ){
+    def descMap = zigbee.parseDescriptionAsMap( description )
+    def cluster = descMap.cluster ?: descMap.clusterId
+	def attrId = descMap.attrId
+	def ClusterIdentified = "Unknown" as String // Meant for logging with class data came in for
+    def Handled = false as boolean // Meant to help identify if a report handler exists for this data
+    switch( cluster ){
+        // General Clusters
+		case "0000": // Basic
+			ClusterIdentified = "Basic"
+            BasicReport( descMap )
+            Handled = true
+			break
+		case "0001": // Power configuration
+			ClusterIdentified = "Power config"
+            //BatteryReport( descMap )
+            //Handled = true
+			break
+		case "0002": // Device temperature config
+			ClusterIdentified = "Device temperature config"
+			break
+		case "0003": // Identify
+			ClusterIdentified = "Identify"
+			break
+		case "0004": // Groups
+			ClusterIdentified = "Groups"
+			break
+		case "0005": // Scenes
+			ClusterIdentified = "Scenes"
+			break
+		case "0006": // On/Off
+			ClusterIdentified = "On/Off"
+			break
+		case "0007": // On/Off switch configuration
+			ClusterIdentified = "On/Off switch configuration"
+			break
+		case "0008": // Level control
+			ClusterIdentified = "Level control"
+			break
+		case "0009": // Alarms
+			ClusterIdentified = "Alarms"
+			break
+        case "000A": // Time
+			ClusterIdentified = "Time"
+			break
+		case "000B": // RSSI Location
+			ClusterIdentified = "RSSI Location"
+            break
+        case "000C": // Analog Input
+			ClusterIdentified = "Analog Input"
+            break
+        case "000D": // Analog Output
+			ClusterIdentified = "Analog Output"
+            break
+        case "000E": // Analog Value
+			ClusterIdentified = "Analog Value"
+            break
+        case "000F": // Binary Input
+			ClusterIdentified = "Binary Input"
+            break
+        case "0010": // Binary Output
+			ClusterIdentified = "Binary Output"
+            break
+        case "0011": // Binary Value
+			ClusterIdentified = "Binary Value"
+            break
+        case "0012": // Multistate Input
+			ClusterIdentified = "Multistate Input"
+            break
+        case "0013": // Multistate Output & ZDO Device Announce
+			ClusterIdentified = "Multistate Output & ZDO Device Announce"
+            AnnounceReport( descMap )
+            Handled = true
+			break
+        case "0014": // Multistate Value
+			ClusterIdentified = "Multistate Value"
+            break
+        case "0015": // Commissioning
+			ClusterIdentified = "Commissioning"
+            break
+        case "0016": // Partition Cluster
+			ClusterIdentified = "Partition Cluster"
+            break
+        case "0017": // Node_Desc_Store_req
+			ClusterIdentified = "Node_Desc_Store_req"
+            break
+        case "0018": // Power_Desc_Store_req
+			ClusterIdentified = "Power_Desc_Store_req"
+            break
+		case "0019": // OTA Upgrades
+			ClusterIdentified = "OTA Upgrades"
+            break
+        case "001A": // Power Profile
+			ClusterIdentified = "Power Profile"
+            break
+        case "001B": // Appliance Control
+			ClusterIdentified = "Appliance Control"
+            break
+        case "001C": // Find_Node_Cache_req
+			ClusterIdentified = "Find_Node_Cache_req"
+            break
+		case "0020": // Poll Control
+			ClusterIdentified = "Poll Control"
+			break
+        case "0021": // Bind_req
+			ClusterIdentified = "Bind_req"
+			break
+        case "0022": // Unbind_req
+			ClusterIdentified = "Unbind_req"
+			break
+        case "0023": // Bind_Register_req
+			ClusterIdentified = "Bind_Register_req"
+			break
+        case "0024": // Replace_Device_req
+			ClusterIdentified = "Replace_Device_req"
+			break
+        case "0025": // Store_Bkup_Bind_Entry_req
+			ClusterIdentified = "Store_Bkup_Bind_Entry_req"
+			break
+        case "0026": // Rm_Bkup_Bind_Entry_req
+			ClusterIdentified = "Rm_Bkup_Bind_Entry_req"
+			break
+        case "0027": // Backup_Bind_Table_req
+			ClusterIdentified = "Backup_Bind_Table_req"
+			break
+        case "0028": // Recover_Bind_Table_req
+			ClusterIdentified = "Recover_Bind_Table_req"
+			break
+        case "0029": // Backup_Source_Bind_req
+			ClusterIdentified = "Backup_Source_Bind_req"
+			break
+        case "002A": // Recover_Source_Bind_req
+			ClusterIdentified = "Recover_Source_Bind_req"
+			break
+        // Network Management
+        case "0030": // Mgmt_NWK_Disc_req
+			ClusterIdentified = "Mgmt_NWK_Disc_req"
+			break
+        case "0031": // Mgmt_LQI_req
+			ClusterIdentified = "Mgmt_LQI_req"
+			break
+        case "0032": // Mgmt_Rtg_req
+			ClusterIdentified = "Mgmt_Rtg_req"
+			break
+        case "0033": // Mgmt_Bind_req
+			ClusterIdentified = "Mgmt_Bind_req"
+			break
+        case "0034": // Mgmt_Leave_req
+			ClusterIdentified = "Mgmt_Leave_req"
+			break
+        case "0035": // Mgmt_Direct_Join_req
+			ClusterIdentified = "Mgmt_Direct_Join_req"
+			break
+        case "0036": // Mgmt_Permit_Join_req
+			ClusterIdentified = "Mgmt_Permit_Join_req"
+			break
+        case "0037": // Mgmt_Cache_req
+			ClusterIdentified = "Mgmt_Cache_req"
+			break
+        case "0038": // Management Network Update Request
+			ClusterIdentified = "Management Network Update Request"
+			break
+        // Closures Clusters
+		case "0100": // Shade configuration
+			ClusterIdentified = "Shade configuration"
+			break
+        case "0101": // Door Lock
+			ClusterIdentified = "Door Lock"
+			break
+		case "0102": // Window Covering
+			ClusterIdentified = "Window Covering"
+			break
+        case "0103": // Barrier Control
+			ClusterIdentified = "Barrier Control"
+			break
+        // HVAC Clusters
+		case "0200": // Pump config and control
+			ClusterIdentified = "Pump config and control"
+			break
+		case "0201": // Thermostat
+			ClusterIdentified = "Thermostat"
+			break
+		case "0202": // Fan Control
+			ClusterIdentified = "Fan control"
+			break
+		case "0203": // Dehumidifier control
+			ClusterIdentified = "Dehumidifier control"
+			break
+		case "0204": // Thermostat UI config
+			ClusterIdentified = "Thermostat UI configur"
+			break
+        // Lighting Clusters
+		case "0300": // Color control
+			ClusterIdentified = "Color control"
+			break
+		case "0301": // Ballast configuration
+			ClusterIdentified = "Ballast configuration"
+			break
+        // Measurement and Sensing Clusters
+		case "0400": // Luminance measurement
+			ClusterIdentified = "Luminance measurement"
+			break
+		case "0401": // Luminance level sensing
+			ClusterIdentified = "Luminance level sensing"
+			break
+		case "0402": // Temperature measurement
+			ClusterIdentified = "Temperature measurement"
+			//TemperatureReport( descMap )
+            //Handled = true
+			break
+		case "0403": // Pressure measurement
+			ClusterIdentified = "Pressure measurement"
+			break
+		case "0404": // Flow measurement
+			ClusterIdentified = "Flow measurement"
+			break
+		case "0405": // Relative humidity measurement
+			ClusterIdentified = "Relative humidity measurement"
+			break
+		case "0406": // Occupancy sensing
+			ClusterIdentified = "Occupancy sensing"
+			break
+        case "040C": // CARBON_MONOXIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "CARBON_MONOXIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "040D": // CARBON_DIOXIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "CARBON_DIOXIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "040E": // ETHYLENE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "ETHYLENE_CONCENTRATION_MEASUREMENT"
+			break
+        case "040F": // ETHYLENE_OXIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "ETHYLENE_OXIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0410": // HYDROGEN_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "HYDROGEN_CONCENTRATION_MEASUREMENT"
+			break
+        case "0411": // HYDROGEN_SULPHIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "HYDROGEN_SULPHIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0412": // NITRIC_OXIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "NITRIC_OXIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0413": // NITROGEN_DIOXIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "NITROGEN_DIOXIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0414": // OXYGEN_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "OXYGEN_CONCENTRATION_MEASUREMENT"
+			break
+        case "0415": // OZONE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "OZONE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0416": // SULFUR_DIOXIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "SULFUR_DIOXIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0417": // DISSOLVED_OXYGEN_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "DISSOLVED_OXYGEN_CONCENTRATION_MEASUREMENT"
+			break
+        case "0418": // BROMATE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "BROMATE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0419": // CHLORAMINES_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "CHLORAMINES_CONCENTRATION_MEASUREMENT"
+			break
+        case "041A": // CHLORINE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "CHLORINE_CONCENTRATION_MEASUREMENT"
+			break
+        case "041B": // FECAL_COLIFORM_AND_E_COLI_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "FECAL_COLIFORM_AND_E_COLI_CONCENTRATION_MEASUREMENT"
+			break
+        case "041C": // FLUORIDE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "FLUORIDE_CONCENTRATION_MEASUREMENT"
+			break
+        case "041D": // HALOACETIC_ACIDS_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "HALOACETIC_ACIDS_CONCENTRATION_MEASUREMENT"
+			break
+        case "041E": // TOTAL_TRIHALOMETHANES_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "TOTAL_TRIHALOMETHANES_CONCENTRATION_MEASUREMENT"
+			break
+        case "041F": // TOTAL_COLIFORM_BACTERIA_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "TOTAL_COLIFORM_BACTERIA_CONCENTRATION_MEASUREMENT"
+			break
+        case "0420": // TURBIDITY_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "TURBIDITY_CONCENTRATION_MEASUREMENT"
+			break
+        case "0421": // COPPER_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "COPPER_CONCENTRATION_MEASUREMENT"
+			break
+        case "0422": // LEAD_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "LEAD_CONCENTRATION_MEASUREMENT"
+			break
+        case "0423": // MANGANESE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "MANGANESE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0424": // SULFATE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "SULFATE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0425": // BROMODICHLOROMETHANE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "BROMODICHLOROMETHANE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0426": // BROMOFORM_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "BROMOFORM_CONCENTRATION_MEASUREMENT"
+			break
+        case "0427": // CHLORODIBROMOMETHANE_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "CHLORODIBROMOMETHANE_CONCENTRATION_MEASUREMENT"
+			break
+        case "0428": // CHLOROFORM_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "CHLOROFORM_CONCENTRATION_MEASUREMENT"
+			break
+        case "0429": // SODIUM_CONCENTRATION_MEASUREMENT
+			ClusterIdentified = "SODIUM_CONCENTRATION_MEASUREMENT"
+			break
+        // Security & Safety Clusters
+		case "0500": // IAS Zone
+			ClusterIdentified = "IAS Zone"
+            //IASZoneReport( descMap )
+            //Handled = true
+			break
+		case "0501": // IAS ACE "Ancillary Control"
+			ClusterIdentified = "IAS ACE Ancillary Control"
+			break
+        case "0502": // IAS WD "Warning Devices"
+			ClusterIdentified = "IAS WD Warning Devices"
+			break
+        // Protocol Interface Clusters
+        case "0600": // Generic Tunnel
+			ClusterIdentified = "Interface Clusters"
+			break
+        case "0601": // BACnet Protocol Tunnel
+			ClusterIdentified = "BACnet Protocol Tunnel"
+			break
+        case "0602": // Analog Input (BACnet Regular)
+			ClusterIdentified = "Analog Input (BACnet Regular)"
+			break
+        case "0603": // Analog Input (BACnet Extended)
+			ClusterIdentified = "Analog Input (BACnet Extended)"
+			break
+        case "0604": // Analog Output (BACnet Regular)
+			ClusterIdentified = "Analog Output (BACnet Regular)"
+			break
+        case "0605": // Analog Output (BACnet Extended)
+			ClusterIdentified = "Analog Output (BACnet Extended)"
+			break
+        case "0606": // Analog Value (BACnet Regular)
+			ClusterIdentified = "Analog Value (BACnet Regular)"
+			break
+        case "0607": // Analog Value (BACnet Extended)
+			ClusterIdentified = "Analog Value (BACnet Extended)"
+			break
+        case "0608": // Binary Input (BACnet Regular)
+			ClusterIdentified = "Binary Input (BACnet Regular)"
+			break
+        case "0609": // Binary Input (BACnet Extended)
+			ClusterIdentified = "Binary Input (BACnet Extended)"
+			break
+        case "060A": // Binary Output (BACnet Regular)
+			ClusterIdentified = "Binary Output (BACnet Regular)"
+			break
+        case "060B": // Binary Output (BACnet Extended)
+			ClusterIdentified = "Binary Output (BACnet Extended)"
+			break
+        case "060C": // Binary Value (BACnet Regular)
+			ClusterIdentified = "Binary Value (BACnet Regular)"
+			break
+        case "060D": // Binary Value (BACnet Extended)
+			ClusterIdentified = "Binary Value (BACnet Extended)"
+			break
+        case "060E": // Multistate Input (BACnet Regular)
+			ClusterIdentified = "Multistate Input (BACnet Regular)"
+			break
+        case "060F": // Multistate Input (BACnet Extended)
+			ClusterIdentified = "Multistate Input (BACnet Extended)"
+			break
+        case "0610": // Multistate Output (BACnet Regular)
+			ClusterIdentified = "Multistate Output (BACnet Regular)"
+			break
+        case "0611": // Multistate Output (BACnet Extended)
+			ClusterIdentified = "Multistate Output (BACnet Extended)"
+			break
+        case "0612": // Multistate Value (BACnet Regular)
+			ClusterIdentified = "Multistate Value (BACnet Regular)"
+			break
+        case "0613": // Multistate Value (BACnet Extended)
+			ClusterIdentified = "Multistate Value (BACnet Extended)"
+			break
+		case "0614": // Protocol Tunnel Cluster
+			ClusterIdentified = "Protocol Tunnel Cluster"
+			break
+		case "0615": // Protocol Tunnel
+			ClusterIdentified = "Protocol Tunnel"
+			break
+		case "0700": // Price
+			ClusterIdentified = "Price"
+			break
+		case "0701": // Demand Response and Load Control
+			ClusterIdentified = "Demand Response and Load Control"
+			break
+        case "0702": // Metering
+			ClusterIdentified = "Metering"
+			break
+		case "0703": // Messaging
+			ClusterIdentified = "Messaging"
+			break
+		case "0704": // Tunneling Cluster
+			ClusterIdentified = "Tunneling Cluster"
+			break
+        case "0705": // PREPAYMENT
+			ClusterIdentified = "PREPAYMENT"
+			break
+        case "0706": // ENERGY_MANAGEMENT
+			ClusterIdentified = "ENERGY_MANAGEMENT"
+			break
+        case "0707": // CALENDAR
+			ClusterIdentified = "CALENDAR"
+			break
+        case "0708": // DEVICE_MANAGEMENT
+			ClusterIdentified = "DEVICE_MANAGEMENT"
+			break
+        case "0709": // EVENTS
+			ClusterIdentified = "EVENTS"
+			break
+        case "070A": // MDU_PAIRING
+			ClusterIdentified = "MDU_PAIRING"
+			break
+        case "070B": // SUB_GHZ
+			ClusterIdentified = "SUB_GHZ"
+			break
+		case "0800": // Key Establishment
+			ClusterIdentified = "Key Establishment"
+			break
+        case "0900": // INFORMATION
+			ClusterIdentified = "INFORMATION"
+			break
+        case "0901": // DATA_SHARING
+			ClusterIdentified = "DATA_SHARING"
+			break
+        case "0902": // GAMING
+			ClusterIdentified = "GAMING"
+			break
+        case "0903": // DATA_RATE_CONTROL
+			ClusterIdentified = "DATA_RATE_CONTROL"
+			break
+        case "0904": // VOICE_OVER_ZIGBEE
+			ClusterIdentified = "VOICE_OVER_ZIGBEE"
+			break
+        case "0905": // CHATTING
+			ClusterIdentified = "CHATTING"
+			break
+        case "0A00": // PAYMENT
+			ClusterIdentified = "PAYMENT"
+			break
+        case "0A01": // BILLING
+			ClusterIdentified = "BILLING"
+			break
+        case "0B00": // APPLIANCE_IDENTIFICATION
+			ClusterIdentified = "APPLIANCE_IDENTIFICATION"
+			break
+		case "0B01": // Meter Identification
+			ClusterIdentified = "Meter Identification"
+			break
+		case "0B02": // Appliance Events and Alerts
+			ClusterIdentified = "Appliance Events and Alerts"
+			break
+		case "0B03": // Appliance Statistics
+			ClusterIdentified = "Appliance Statistics"
+			break
+		case "0B04": // Electrical Measurement
+			ClusterIdentified = "Electrical Measurement"
+			break
+		case "0B05": // Diagnostic
+			ClusterIdentified = "Diagnostic"
+			break
+        case "1000": // ZLL_COMMISSIONING
+			ClusterIdentified = "ZLL_COMMISSIONING"
+			break
+        case "8000": // NWK_ADDR_RSP
+			ClusterIdentified = "NWK_ADDR_RSP"
+            break
+        case "8001": // IEEE_ADDR_RSP
+			ClusterIdentified = "IEEE_ADDR_RSP"
+            break
+        case "8002": // NODE_DESC_RSP
+			ClusterIdentified = "NODE_DESC_RSP"
+            break
+        case "8003": // POWER_DESC_RSP
+			ClusterIdentified = "POWER_DESC_RSP"
+            break
+        case "8004": // SIMPLE_DESC_RSP
+			ClusterIdentified = "SIMPLE_DESC_RSP"
+            break
+        case "8005": // ACTIVE_EP_RSP
+			ClusterIdentified = "ACTIVE_EP_RSP"
+            break
+        case "8006": // MATCH_DESC_RSP
+			ClusterIdentified = "MATCH_DESC_RSP"
+            break
+        case "8010": // Complex_Desc_rsp
+			ClusterIdentified = "Complex_Desc_rsp"
+            break
+        case "8011": // User_Desc_rsp
+			ClusterIdentified = "User_Desc_rsp"
+            break
+        case "8012": // Discovery_Cache_rsp
+			ClusterIdentified = "Discovery_Cache_rsp"
+            break
+        case "8014": // User_Desc_Conf
+			ClusterIdentified = "User_Desc_Conf"
+            break
+        case "8015": // System_Server_Discover_rsp
+			ClusterIdentified = "System_Server_Discover_rsp"
+            break
+        case "8016": // Discovery_Store_rsp
+			ClusterIdentified = "Discovery_Store_rsp"
+            break
+        case "8017": // Node_Desc_Store_rso
+			ClusterIdentified = "Node_Desc_Store_rso"
+            break
+        case "8018": // Power_Desc_Store_rsp
+			ClusterIdentified = "Power_Desc_Store_rsp"
+            break
+        case "8019": // Active_EP_Store_rsp
+			ClusterIdentified = "Active_EP_Store_rsp"
+            break
+        case "801A": // Simple_Desc_Store_rsp
+			ClusterIdentified = "Simple_Desc_Store_rsp"
+            break
+        case "801B": // Remove_Node_Cache_rsp
+			ClusterIdentified = "Remove_Node_Cache_rsp"
+            break
+        case "801C": // Find_Node_Cache_rsp
+			ClusterIdentified = "Find_Node_Cache_rsp"
+            break
+        // End Device Bind, Unbind and Bind Management 
+		case "8020": // End_Dev_Bind_rsp
+			ClusterIdentified = "End_Dev_Bind_rsp"
+			break
+        case "8021": // Bind_rsp
+			ClusterIdentified = "Bind_rsp"
+            HandleBindResponse( descMap )
+            Handled = true
+			break
+        case "8022": // Unbind_rsp
+			ClusterIdentified = "Unbind_rsp"
+			break
+        case "8023": // Bind_Register_rsp
+			ClusterIdentified = "Bind_Register_rsp"
+			break
+        case "8024": // Replace_Device_rsp
+			ClusterIdentified = "Replace_Device_rsp"
+			break
+        case "8025": // Store_Bkup_Bind_Entry_rsp
+			ClusterIdentified = "Store_Bkup_Bind_Entry_rsp"
+			break
+        case "8026": // Rm_Bkup_Bind_Entry_rsp
+			ClusterIdentified = "Rm_Bkup_Bind_Entry_rsp"
+			break
+        case "8027": // Backup_Bind_Table_rsp
+			ClusterIdentified = "Backup_Bind_Table_rsp"
+			break
+        case "8028": // Recover_Bind_Table_rsp
+			ClusterIdentified = "Recover_Bind_Table_rsp"
+			break
+        case "8029": // Backup_Source_Bind_rsp
+			ClusterIdentified = "Backup_Source_Bind_rsp"
+			break
+        case "802A": // Recover_Source_Bind_rsp
+			ClusterIdentified = "Recover_Source_Bind_rsp"
+			break
+        // Network Management
+        case "8030": // Mgmt_NWK_Disc_rsp
+			ClusterIdentified = "Mgmt_NWK_Disc_rsp"
+			break
+        case "8031": // Mgmt_LQI_rsp
+			ClusterIdentified = "Mgmt_LQI_rsp"
+			break
+        case "8032": // Mgmt_Rtg_rsp
+			ClusterIdentified = "Mgmt_Rtg_rsp"
+			break
+        case "8033": // Mgmt_Bind_rsp
+			ClusterIdentified = "Mgmt_Bind_rsp"
+			break
+        case "8034": // Mgmt_Leave_rsp
+			ClusterIdentified = "Mgmt_Leave_rsp"
+            HandleLeaveResponse( descMap )
+            Handled = true
+			break
+        case "8035": // Mgmt_Direct_Join_rsp
+			ClusterIdentified = "Mgmt_Direct_Join_rsp"
+			break
+        case "8036": // Mgmt_Permit_Join_rsp
+			ClusterIdentified = "Mgmt_Permit_Join_rsp"
+			break
+        case "8037": // Mgmt_Cache_rsp
+			ClusterIdentified = "Mgmt_Cache_rsp"
+			break
+        case "8038": // Management Network Update Notify
+			ClusterIdentified = "Management Network Update Notify"
+			break
+        case "EF00": // Tuya Specific Cluster
+			ClusterIdentified = "Tuya Specific Cluster"
+            //Logging( "Tuya Data : ${ descMap }", 4 )
+            HandleTuyaCluster( descMap )
+            Handled = true
+			break
+        case "FC00": // SAMPLE_MFG_SPECIFIC
+			ClusterIdentified = "SAMPLE_MFG_SPECIFIC"
+			break
+        case "FC01": // OTA_CONFIGURATION
+			ClusterIdentified = "OTA_CONFIGURATION"
+			break
+        case "FC02": // MFGLIB
+			ClusterIdentified = "MFGLIB"
+			break
+        case "FC57": // SL_WWAH
+			ClusterIdentified = "SL_WWAH"
+			break
+		case "FD00": // Halo Smoke Detector Only ???
+			ClusterIdentified = "Halo Smoke Detector Only ???"
+			break
+		case "FD01": // Halo Smoke Detector Only ???
+			ClusterIdentified = "Halo Smoke Detector Only ???"
+			break
+		case "FD02": // Halo Smoke Detector Only ???
+			ClusterIdentified = "Halo Smoke Detector Only ???"
+			break
+		default:
+			ClusterIdentified = "Unknown"
+            break
+    }
+    if( ClusterIdentified == "Unknown" ){
+	    Logging( "Unknown cluster. descMap = ${ descMap }", 3 )        
+    } else {
+        if( !Handled ){
+	        Logging( "Unhandled cluster. ${ cluster } is ${ ClusterIdentified }, descMap = ${ descMap }", 3 )
+        }
+    }
+}
+
+// Attempts to process the Tuya Specific cluster
+private HandleTuyaCluster( descMap ){
+	if( descMap == null ) return
+    if( descMap.data == null ) return
+    if( descMap.data.size() == 10 ){
+        def Value = hexStrToSignedInt( "${ descMap.data[ 8 ] }${ descMap.data[ 9 ] }" )
+        switch( descMap.data[ 2 ] ){
+            case "02": // humidity
+                Logging( "Tuya Field 2 - Raw Humidity: ${ Value }", 4 )
+                if( HumidityOffset == null ){
+                    HumidityOffset = 0
+                }
+                    ProcessEvent( "humidity", ( Math.round( ( ( Value / 10 ) + ( HumidityOffset as float ) ) * 10 ) / 10 ) as float, "%" )
+                break
+            case "12": // temperature
+                Logging( "Tuya Field 12 - Raw Temperature: ${ Value }", 4 )
+                if( TemperatureOffset == null ){
+                    TemperatureOffset = 0
+                }
+                ProcessEvent( "temperature", ( Math.round( ( ConvertTemperature( "C", ( Value / 10 ) ) + ( TemperatureOffset as float ) ) * 10 ) / 10 ) as float, "Â°${ location.temperatureScale }" )
+                break
+            case "13": // carbon dioxide
+                Logging( "Tuya Field 13 - Raw CO2: ${ Value }", 4 )
+                if( CO2Offset == null ){
+                    CO2Offset = 0
+                }
+                ProcessEvent( "carbonDioxide", ( Math.round( ( Value + ( CO2Offset as float ) ) * 10 ) / 10 ) as float, "ppm" )
+                break
+            case "15": // formaldehyde
+                Logging( "Tuya Field 15 - Raw Formaldehyde: ${ Value }", 4 )
+                if( FormaldehydeOffset == null ){
+                    FormaldehydeOffset = 0
+                }
+                ProcessEvent( "formaldehyde", ( Math.round( ( ( Value / 10 ) + ( FormaldehydeOffset as float ) ) * 10 ) / 10 ) as float, "ppm" )
+                break
+            case "16": // VOC
+                Logging( "Tuya Field 16 - Raw VOC: ${ Value }", 4 )
+                if( VOCOffset == null ){
+                    VOCOffset = 0
+                }
+                ProcessEvent( "VOC", ( Math.round( ( ( Value / 10 ) + ( VOCOffset as float ) ) * 10 ) / 10 ) as float, "mg/m3" )
+                break
+            default:
+                Logging( "Tuya Cluster Data: ${ descMap.data }", 4 )
+                break
+        }
+    } else {
+        Logging( "Unknown Tuya Cluster Data: ${ descMap.data }", 4 )
+    }
+}
+
+// Processes bind responses
+def HandleBindResponse( descMap ){
+    //Logging( "Bind Response: ${ descMap }", 4 )
+}
+
+// Processes bind responses
+def HandleLeaveResponse( descMap ){
+    Logging( "Received the command to leave the hub.", 2 )
+}
+
+// Processes reporting for the Basic class
+def BasicReport( descMap ){
+    switch( descMap.attrId ){
+        case "0000":
+            Logging( "ZCLVersion = ${ descMap.value }", 4 )
+            break
+        case "0001":
+            Logging( "ApplicationVersion = ${ descMap.value }", 4 )
+            break
+        case "0002":
+            Logging( "StackVersion = ${ descMap.value }", 4 )
+            break
+        case "0003":
+            Logging( "HardwareVersion = ${ descMap.value }", 4 )
+            break
+        case "0004":
+            Logging( "ManufacturerName = ${ descMap.value }", 4 )
+            break
+        case "0005":
+            Logging( "ModelIdentifier = ${ descMap.value }", 4 )
+            break
+        case "0006":
+            Logging( "DateCode = ${ descMap.value }", 4 )
+            break
+        case "0007":
+            switch( descMap.value ){
+                case "00":
+                    Logging( "PowerSource = Unknown", 3 )
+                    break
+                case "01":
+                    Logging( "PowerSource = Mains (single phase)", 4 )
+                    break
+                case "02":
+                    Logging( "PowerSource = Mains (3 phase)", 4 )
+                    break
+                case "03":
+                    Logging( "PowerSource = Battery", 4 )
+                    break
+                case "04":
+                    Logging( "PowerSource = DC source", 4 )
+                    break
+                case "05":
+                    Logging( "PowerSource = Emergency mains constantly powered", 4 )
+                    break
+                case "06":
+                    Logging( "PowerSource = Emergency mains and transfer switch", 4 )
+                    break
+                default:
+                    Logging( "PowerSource is unlisted", 4 )
+                    break
+            }
+            break
+        case "0010":
+            Logging( "LocationDescription = ${ descMap.value }", 4 )
+            break
+        case "0011":
+            Logging( "PhysicalEnvironment = ${ descMap.value }", 4 )
+            break
+        case "0012":
+            Logging( "DeviceEnabled = ${ descMap.value }", 4 )
+            break
+        case "0013":
+            Logging( "AlarmMask = ${ descMap.value }", 4 )
+            break
+        case "0014":
+            Logging( "DisableLocalConfig = ${ descMap.value }", 4 )
+            break
+        case "4000":
+            Logging( "SWBuildID = ${ descMap.value }", 4 )
+            break
+        default:
+            Logging( "Basic descMap = ${ descMap }", 3 )
+            break
+    }    
+}
+
+// Handles ZDO Announce reports
+def AnnounceReport( descMap ){
+    switch( descMap.command ){
+        case "00":
+            Logging( "Device alive/awake", 4 )
+            break
+        default:
+            Logging( "Announce Report ${ descMap }", 3 )
+            break
+    }
+}
+
+// ReadDevice is meant to check all the device basic information
+def ReadDevice(){
+    def cmds = zigbee.readAttribute( 0x0000, 0x0000 ) // ZCLVersion = REPORTED
+    cmds = cmds + zigbee.readAttribute( 0x0000, 0x0001 ) // ApplicationVersion = REPORTED
+    cmds = cmds + zigbee.readAttribute( 0x0000, 0x0002 ) // StackVersion = REPORTED
+    cmds = cmds + zigbee.readAttribute( 0x0000, 0x0003 ) // HardwareVersion = REPORTED
+    cmds = cmds + zigbee.readAttribute( 0x0000, 0x0004 ) // ManufacturerName = REPORTED
+    cmds = cmds + zigbee.readAttribute( 0x0000, 0x0005 ) // ModelIdentifier = REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0000, 0x0006 ) // DateCode = NULL REPORTED
+    cmds = cmds + zigbee.readAttribute( 0x0000, 0x0007 ) // PowerSource = REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0000, 0x0010 ) // LocationDescription = NOT REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0000, 0x0011 ) // PhysicalEnvironment = NOT REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0000, 0x0012 ) // DeviceEnabled = NOT REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0000, 0x0013 ) // AlarmMask = NOT REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0000, 0x0014 ) // DisableLocalConfig = NOT REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0000, 0x4000 ) // SWBuildID = NOT REPORTED
+    //cmds = cmds + zigbee.readAttribute( 0x0500, 0x0001 ) // Type of sensor = NOT REPORTED
+    Logging( "Sending request for Basic cluster data", 4 )
+    return cmds
+}
+
+// Sets the list of read commands
+def ZigBeeReadCommands(){
+    def cmds = zigbee.readAttribute( 0xEF00, 0x00 )
+    Logging( "Sending request to read device attributes", 4 )
+    return cmds
+}
+
+// Gets the list of commands
+def ZigBeeReportingCommands(){
+    /*
+    Tuya Field 2 - Humidity = Value / 10
+    Tuya Field 12 - Temperature = Value / 10
+    Tuya Field 13 - CO2 = Value
+    Tuya Field 15 - Formaldehyde = Value / 10
+    Tuya Field 16 - VOC = Value / 10
+    */
+    def cmds = ZigBeeReadCommands()
+    switch( ReportInterval ){
+        case "1 minute":
+            cmds += zigbee.configureReporting( 0xEF00, 0x00, DataType.INT16, 30, 60, null )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0002, DataType.INT16, 1, 60, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0012, DataType.INT16, 1, 60, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0013, DataType.INT16, 1, 60, 10 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0015, DataType.INT16, 1, 60, 1 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0016, DataType.INT16, 1, 60, 1 )
+            break
+        case "5 minutes":
+            cmds += zigbee.configureReporting( 0xEF00, 0x00, DataType.INT16, 150, 300, null )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0002, DataType.INT16, 1, 300, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0012, DataType.INT16, 1, 300, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0013, DataType.INT16, 1, 300, 10 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0015, DataType.INT16, 1, 300, 1 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0016, DataType.INT16, 1, 300, 1 )
+            break
+        case "10 minutes":
+            cmds += zigbee.configureReporting( 0xEF00, 0x00, DataType.INT16, 300, 600, null )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0002, DataType.INT16, 1, 600, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0012, DataType.INT16, 1, 600, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0013, DataType.INT16, 1, 600, 10 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0015, DataType.INT16, 1, 600, 1 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0016, DataType.INT16, 1, 600, 1 )
+            break
+        case "1 hour":
+            cmds += zigbee.configureReporting( 0xEF00, 0x00, DataType.INT16, 1800, 3600, null )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0002, DataType.INT16, 1, 3600, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0012, DataType.INT16, 1, 3600, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0013, DataType.INT16, 1, 3600, 10 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0015, DataType.INT16, 1, 3600, 1 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0016, DataType.INT16, 1, 3600, 1 )
+            break
+        case "1 day":
+            cmds += zigbee.configureReporting( 0xEF00, 0x00, DataType.INT16, 43200, 86400, null )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0002, DataType.INT16, 1, 86400, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0012, DataType.INT16, 1, 86400, 20 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0013, DataType.INT16, 1, 86400, 10 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0015, DataType.INT16, 1, 86400, 1 )
+            //cmds += zigbee.configureReporting( 0xEF00, 0x0016, DataType.INT16, 1, 86400, 1 )
+            break
+    }
+    Logging( "Sending request to set ZigBee reporting", 4 )
+    return cmds
+}
+
+// refresh command
+def refresh(){
+    Logging( "Refreshing device...", 2 )
+    return ZigBeeReadCommands()
+}
+
+// Configures the device, typically at install or when preferences are saved
+def configure(){
+	Logging( "Configuring device...", 2 )
+    return ZigBeeReportingCommands()
+}
+
+// installed is called when the device is installed, all it really does is run updated
+def installed(){
+	Logging( "Installed", 2 )
+	updated()
+}
+
+// initialize is called when the device is initialized, all it really does is run updated
+def initialize(){
+	Logging( "Initialized", 2 )
+	updated()
+}
+
+// Checks the location.getTemperatureScale() to convert temperature values
+def ConvertTemperature( String Scale, Number Value ){
+    if( Value != null ){
+        def ReturnValue = Value as double
+        if( location.getTemperatureScale() == "C" && Scale.toUpperCase() == "F" ){
+            ReturnValue = ( ( ( Value - 32 ) * 5 ) / 9 )
+            Logging( "Temperature Conversion ${ Value }Â°${ Scale.toUpperCase() } to ${ ReturnValue }Â°${ location.getTemperatureScale() }", 4 )
+        } else if( location.getTemperatureScale() == "F" && Scale.toUpperCase() == "C" ) {
+            ReturnValue = ( ( ( Value * 9 ) / 5 ) + 32 )
+            Logging( "Temperature Conversion ${ Value }Â°${ Scale.toUpperCase() } to ${ ReturnValue }Â°${ location.getTemperatureScale() }", 4 )
+        } else if( location.getTemperatureScale() == Scale.toUpperCase() ){
+            ReturnValue = Value
+        }
+        def TempInt = ( ReturnValue * 100 ) as int
+        ReturnValue = ( TempInt / 100 )
+        return ReturnValue
+    }
+}
+
+// Process data to check against current state value and then send an event if it has changed
+def ProcessEvent( Variable, Value, Unit = null ){
+    if( state."${ Variable }" != Value ){
+        state."${ Variable }" = Value
+        if( Unit != null ){
+            Logging( "Event: ${ Variable } = ${ Value }${ Unit }", 4 )
+            sendEvent( name: "${ Variable }", value: Value, unit: Unit, isStateChanged: true )
+        } else {
+            Logging( "Event: ${ Variable } = ${ Value }", 4 )
+            sendEvent( name: "${ Variable }", value: Value, isStateChanged: true )
+        }
+    }
+}
+
+// Process data to check against current state value and then send an event if it has changed
+def ProcessState( Variable, Value ){
+    if( state."${ Variable }" != Value ){
+        Logging( "State: ${ Variable } = ${ Value }", 4 )
+        state."${ Variable }" = Value
+    }
+}
+
+// Handles whether logging is enabled and thus what to put there.
+def Logging( LogMessage, LogLevel ){
+	// Add all messages as info logging
+    if( ( LogLevel == 2 ) && ( LogType != "None" ) ){
+        log.info( "${ device.displayName } - ${ LogMessage }" )
+    } else if( ( LogLevel == 3 ) && ( ( LogType == "Debug" ) || ( LogType == "Trace" ) ) ){
+        log.debug( "${ device.displayName } - ${ LogMessage }" )
+    } else if( ( LogLevel == 4 ) && ( LogType == "Trace" ) ){
+        log.trace( "${ device.displayName } - ${ LogMessage }" )
+    } else if( LogLevel == 5 ){
+        log.error( "${ device.displayName } - ${ LogMessage }" )
+    }
+}
+
+// Checks drdsnell.com for the latest version of the driver
+// Original inspiration from @cobra's version checking
+def CheckForUpdate(){
+	httpGet( uri: "https://www.drdsnell.com/projects/hubitat/drivers/versions.json", contentType: "application/json" ){ resp ->
+        switch( resp.status ){
+            case 200:
+                if( resp.data."${ state.'Driver Name' }" ){
+                    CurrentVersion = state.'Driver Version'.split( /\./ )
+                    if( resp.data."${ state.'Driver Name' }".version == "REPLACED" ){
+                       sendEvent( name: "Driver Status", value: "Driver replaced, please use ${ resp.data."${ state.'Driver Name' }".file }" )
+                    } else {
+                        SiteVersion = resp.data."${ state.'Driver Name' }".version.split( /\./ )
+                        if( CurrentVersion == SiteVersion ){
+                            Logging( "Driver version up to date", 3 )
+				            sendEvent( name: "Driver Status", value: "Up to date" )
+                        } else if( ( CurrentVersion[ 0 ] as int ) > ( SiteVersion [ 0 ] as int ) ){
+                            Logging( "Major development ${ CurrentVersion[ 0 ] }.${ CurrentVersion[ 1 ] }.${ CurrentVersion[ 2 ] } version", 3 )
+				            sendEvent( name: "Driver Status", value: "Major development ${ CurrentVersion[ 0 ] }.${ CurrentVersion[ 1 ] }.${ CurrentVersion[ 2 ] } version" )
+                        } else if( ( CurrentVersion[ 1 ] as int ) > ( SiteVersion [ 1 ] as int ) ){
+                            Logging( "Minor development ${ CurrentVersion[ 0 ] }.${ CurrentVersion[ 1 ] }.${ CurrentVersion[ 2 ] } version", 3 )
+				            sendEvent( name: "Driver Status", value: "Minor development ${ CurrentVersion[ 0 ] }.${ CurrentVersion[ 1 ] }.${ CurrentVersion[ 2 ] } version" )
+                        } else if( ( CurrentVersion[ 2 ] as int ) > ( SiteVersion [ 2 ] as int ) ){
+                            Logging( "Patch development ${ CurrentVersion[ 0 ] }.${ CurrentVersion[ 1 ] }.${ CurrentVersion[ 2 ] } version", 3 )
+				            sendEvent( name: "Driver Status", value: "Patch development ${ CurrentVersion[ 0 ] }.${ CurrentVersion[ 1 ] }.${ CurrentVersion[ 2 ] } version" )
+                        } else if( ( SiteVersion[ 0 ] as int ) > ( CurrentVersion[ 0 ] as int ) ){
+                            Logging( "New major release ${ SiteVersion[ 0 ] }.${ SiteVersion[ 1 ] }.${ SiteVersion[ 2 ] } available", 2 )
+				            sendEvent( name: "Driver Status", value: "New major release ${ SiteVersion[ 0 ] }.${ SiteVersion[ 1 ] }.${ SiteVersion[ 2 ] } available" )
+                        } else if( ( SiteVersion[ 1 ] as int ) > ( CurrentVersion[ 1 ] as int ) ){
+                            Logging( "New minor release ${ SiteVersion[ 0 ] }.${ SiteVersion[ 1 ] }.${ SiteVersion[ 2 ] } available", 2 )
+				            sendEvent( name: "Driver Status", value: "New minor release ${ SiteVersion[ 0 ] }.${ SiteVersion[ 1 ] }.${ SiteVersion[ 2 ] } available" )
+                        } else if( ( SiteVersion[ 2 ] as int ) > ( CurrentVersion[ 2 ] as int ) ){
+                            Logging( "New patch ${ SiteVersion[ 0 ] }.${ SiteVersion[ 1 ] }.${ SiteVersion[ 2 ] } available", 2 )
+				            sendEvent( name: "Driver Status", value: "New patch ${ SiteVersion[ 0 ] }.${ SiteVersion[ 1 ] }.${ SiteVersion[ 2 ] } available" )
+                        }
+                    }
+                } else {
+                    Logging( "Unpublished driver", 3 )
+                    sendEvent( name: "Driver Status", value: "Unpublished driver" )
+                }
+                break
+            default:
+                Logging( "Unable to check drdsnell.com for driver updates.", 3 )
+                break
+        }
+    }
+}
