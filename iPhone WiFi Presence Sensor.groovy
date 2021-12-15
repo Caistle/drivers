@@ -19,7 +19,7 @@
 import groovy.json.*
 	
 metadata {
-	definition (name: "iPhone WiFi Presence Sensor", namespace: "joelwetzel", author: "Joel Wetzel", importURL: "") {
+	definition (name: "iPhone WiFi Presence Sensor", namespace: "joelwetzel", author: "Joel Wetzel", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/iPhone%20WiFi%20Presence%20Sensor.groovy?token=AU7T2OA7GDKKNS6COXR7HF3BXIGAQ") {
 		capability "Refresh"
 		capability "Sensor"
         capability "Presence Sensor"
