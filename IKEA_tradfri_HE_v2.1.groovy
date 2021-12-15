@@ -31,7 +31,8 @@ import hubitat.helper.ColorUtils
 metadata {
     definition (name: "IKEA Tradfri RGBW Light HE v2.1",
             namespace: "iholand",
-            author: "Ivar Holand") {
+            author: "Ivar Holand", 
+	    importUrl: "https://raw.githubusercontent.com/GvnCampbell/Hubitat/master/Drivers/FullyKioskBrowserController.groovy") {
 
         capability "Actuator"
         capability "Color Control"
