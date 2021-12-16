@@ -14,7 +14,7 @@
 
 
 metadata {
-	definition (name: "IKEA Styrbar", namespace: "Hubitat", author: "akafester", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/IKEA%20Styrbar.groovy?token=AU7T2OCS22HU5TXNKKISGN3BXIFG4") {
+	definition (name: "IKEA Styrbar", namespace: "Hubitat", author: "akafester", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/IKEAStyrbar.groovy?token=AU7T2OCS22HU5TXNKKISGN3BXIFG4") {
 	
     capability "Actuator"
     capability "Battery"
