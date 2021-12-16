@@ -32,7 +32,7 @@ metadata {
     definition (name: "IKEA Tradfri RGBW Light HE v2.1",
             namespace: "iholand",
             author: "Ivar Holand", 
-	    importUrl: "https://raw.githubusercontent.com/GvnCampbell/Hubitat/master/Drivers/FullyKioskBrowserController.groovy") {
+	    importUrl: "https://raw.githubusercontent.com/Caistle/drivers/main/IKEATradfriRGBWLightHEv2.1.groovy?token=AU7T2OFMI6KPZEFDRV7UEELBXMGZU") {
 
         capability "Actuator"
         capability "Color Control"
