@@ -20,7 +20,7 @@
  *    2021-08-29  Simon Burke    Added batteryStatus attribute
  */
 metadata {
-	definition (name: 'Virtual Battery Sensor', namespace: 'simnet', author: 'Simon Burke', importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/VirtualBatterySensor.groovy?token=AU7T2OA2FEK6T3X2MMKZ74DBXIG3Y") {
+	definition (name: 'Virtual Battery Sensor', namespace: 'simnet', author: 'Simon Burke', importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/VirtualBatterySensor.groovy?token=AU7T2OAC4H4QVIURLVOZ3J3BXMIAM") {
         capability 'Battery'
         attribute 'battery', 'number'
         attribute 'lastUpdated', 'date'
