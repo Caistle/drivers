@@ -16,7 +16,7 @@
 import hubitat.zigbee.clusters.iaszone.ZoneStatus
  
 metadata {
-	definition (name: "Heiman Gas Detector", namespace: "hubitat", author: "cuboy29", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/Heiman%20Gas%20Detector.groovy?token=AU7T2OCKVPH7F3Y4LJQIZDLBXIET6") {
+	definition (name: "Heiman Gas Detector", namespace: "hubitat", author: "cuboy29", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/HeimanGasDetector.groovy?token=AU7T2OCKVPH7F3Y4LJQIZDLBXIET6") {
 		
         capability "Configuration"
         capability "SmokeDetector"
