@@ -36,7 +36,7 @@
 import hubitat.zigbee.zcl.DataType
 
 metadata{
-	definition( name: "Tuya Multi Sensor", namespace: "Snell", author: "David Snell", importUrl: "https://www.drdsnell.com/projects/hubitat/drivers/Tuya Multi Sensor.groovy" ){
+	definition( name: "Tuya Multi Sensor", namespace: "Snell", author: "David Snell", importUrl: "https://raw.githubusercontent.com/Caistle/drivers/main/TuyaMultiSensor?token=AU7T2ODSDV7TNLPKUOAGZLTBXMH36" ){
 		capability "Configuration"
 		capability "Refresh"
         capability "Battery"
