@@ -41,7 +41,7 @@
  */
  
 metadata {
-	definition (name: "SAGE Doorbell Sensor", namespace: "trunzoc", author: "Craig Trunzo, importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/SAGEDoorbellSensor.groovy?token=AU7T2OFHPDEVJ3YDL7VY2C3BXMHH4") {
+	definition (name: "SAGE Doorbell Sensor", namespace: "trunzoc", author: "Craig Trunzo", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/SAGEDoorbellSensor.groovy?token=AU7T2OFHPDEVJ3YDL7VY2C3BXMHH4") {
     	//capability "Battery"
 		capability "Configuration"
         capability "Pushable Button"
