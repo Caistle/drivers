@@ -1,7 +1,7 @@
 // Copyright 2016-2019 Hubitat Inc.  All Rights Reserved
 
 metadata {
-    definition (name: "Netatmo Home Coach", namespace: "Caistle", author: "Simon Darby", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/Netatmo%20Home%20Coach.groovy?token=AU7T2OEFBOMFPSUIUJQU7HDBXIGEW") {
+    definition (name: "Netatmo Home Coach", namespace: "Caistle", author: "Simon Darby", importURL: "https://raw.githubusercontent.com/Caistle/drivers/main/NetatmoHomeCoach.groovy?token=AU7T2OGTB3KF3EYG77UCP5TBXMHEA") {
         capability "Presence Sensor"
         capability "Carbon Dioxide Measurement"
         capability "Relative Humidity Measurement"
