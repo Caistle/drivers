@@ -38,7 +38,7 @@
 import hubitat.zigbee.zcl.DataType
 
 metadata{
-	definition( name: "Tuya Air Sensor", namespace: "Snell", author: "David Snell", importUrl: "https://www.drdsnell.com/projects/hubitat/drivers/Tuya Air Sensor.groovy" ){
+	definition( name: "Tuya Air Sensor", namespace: "Snell", author: "David Snell", importUrl: "https://raw.githubusercontent.com/Caistle/drivers/main/TuyaAirSensor?token=AU7T2OGMNUDSTJXSBPQAA7LBXMHVW" ){
 		//capability "Configuration"
 		//capability "Refresh"
 		capability "Sensor"
