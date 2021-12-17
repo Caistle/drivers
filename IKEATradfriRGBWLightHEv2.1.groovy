@@ -49,6 +49,7 @@ metadata {
 
         // Trådfri RGB bulb
         fingerprint profileId: "0104", inClusters: "0000, 0003, 0004, 0005, 0006, 0008, 0300, 0B05, 1000", outClusters: "0005, 0019, 0020, 1000", manufacturer: "IKEA of Sweden",  model: "TRADFRI bulb E27 CWS opal 600lm", deviceJoinName: "TRADFRI bulb E27 CWS opal 600lm"
+    	fingerprint profileId:"0104", endpointId:"01", inClusters:"0000,0003,0004,0005,0006,0008,0300,1000,FC7C", outClusters:"0019,1000", model:"TRADFRI bulb E27 CWS opal 600lm", manufacturer:"IKEA of Sweden"
     }
 
     preferences {
